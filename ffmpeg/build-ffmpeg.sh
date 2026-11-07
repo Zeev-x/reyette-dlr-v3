@@ -4,7 +4,9 @@
 
 set -Eeuo pipefail
 
-ROOT="/d/ffmpeg-build"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+ROOT="$SCRIPT_DIR"
 DEPS_DIR="$ROOT/dependencies"
 SRC_DIR="$ROOT/source"
 OUT_DIR="$ROOT/output"
@@ -54,7 +56,7 @@ make -C "$NVENC_DIR" install PREFIX=/ucrt64
 
 NVENC_VERSION="$(pkg-config --modversion ffnvcodec)"
 printf 'NVENC headers terdeteksi: %s\n' "$NVENC_VERSION"
-[[ "$NVENC_VERSION" == "13.0.19.1" ]] || die "Versi ffnvcodec harus 13.0.19.1, terdeteksi $NVENC_VERSION"
+[[ "$NVENC_VERSION" == 13.0.19.1* ]] || die "Versi ffnvcodec tidak sesuai: $NVENC_VERSION"
 
 log "Mengambil FFmpeg $FFMPEG_TAG"
 if [[ ! -d "$FFMPEG_DIR/.git" ]]; then
