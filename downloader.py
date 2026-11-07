@@ -17,6 +17,8 @@ if platform.system() == "Windows":
         os.path.dirname(os.path.abspath(__file__)),
         "ffmpeg",
         "ffmpeg-win64",
+        "output",
+        "bin",
     )
     FFMPEG_EXECUTABLE = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
 else:
