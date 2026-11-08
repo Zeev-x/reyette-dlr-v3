@@ -17,14 +17,19 @@ if platform.system() == "Windows":
         os.path.dirname(os.path.abspath(__file__)),
         "ffmpeg",
         "ffmpeg-win64",
-        "output",
-        "bin",
     )
     FFMPEG_EXECUTABLE = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
 else:
-    BASE_DIR = "Reyette-Downloader"
-    FFMPEG_DIR = None
-    FFMPEG_EXECUTABLE = "ffmpeg"
+    BASE_DIR = os.path.join(os.path.expanduser("~"), "Reyette-Downloader")
+    FFMPEG_DIR = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "ffmpeg",
+        "ffmpeg-linux64",
+    )
+    FFMPEG_EXECUTABLE = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
+
+if not os.path.exists(FFMPEG_EXECUTABLE):
+    FFMPEG_EXECUTABLE = "ffmpeg"  # fallback to system ffmpeg if not found
 
 def find_cover():
     asset_path = os.path.join("cover", "cover.png")
@@ -185,6 +190,12 @@ def single_cmd(video_file, output_file, encoder=None):
 
 def audio_cmd(audio_file, output_file):
     cover_file = find_cover()
+    encoder = detect_audio_encoder()
+    audio_options = (
+        ["-c:a", encoder, "-q:a", "0"]
+        if encoder == "libmp3lame"
+        else ["-c:a", encoder, "-b:a", "320k"]
+    )
 
     if cover_file:
         cmd = [
@@ -192,7 +203,7 @@ def audio_cmd(audio_file, output_file):
             "-i", audio_file,
             "-i", cover_file,
             "-map", "0:a", "-map", "1:v",
-            "-c:a", "libmp3lame", "-q:a", "0",
+            *audio_options,
             "-c:v", "mjpeg",
             "-disposition:v", "attached_pic",
             "-id3v2_version", "3",
@@ -202,10 +213,48 @@ def audio_cmd(audio_file, output_file):
         cmd = [
             FFMPEG_EXECUTABLE, "-y",
             "-i", audio_file,
-            "-c:a", "libmp3lame", "-q:a", "0",
+            *audio_options,
             output_file
         ]
     return cmd
+
+
+def detect_audio_encoder():
+    command = [FFMPEG_EXECUTABLE, "-hide_banner", "-encoders"]
+    if is_windows():
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg gagal memeriksa encoder audio: {result.stdout.strip()}")
+
+    available_encoders = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and re.fullmatch(r"[A-Z.]{6}", fields[0]):
+            available_encoders.add(fields[1])
+
+    for encoder in ("libmp3lame", "mp3_mf", "libshine"):
+        if encoder in available_encoders:
+            return encoder
+
+    raise RuntimeError("FFmpeg tidak memiliki encoder MP3 yang didukung.")
 
 def detect_platform(url: str) -> str:
     if "youtube.com" in url or "youtu.be" in url:
@@ -292,7 +341,11 @@ def do_work(args=None):
                 for line in process.stdout:
                     log(line.strip())
                 process.wait()
-                
+                if process.returncode != 0:
+                    if os.path.exists(output_file):
+                        os.remove(output_file)
+                    raise subprocess.CalledProcessError(process.returncode, cmd)
+
                 log(f"✅ Success: {output_file}")
                 if os.path.exists(audio_file) and audio_file != output_file:
                     os.remove(audio_file)
