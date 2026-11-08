@@ -393,4 +393,10 @@ echo "- Driver NVIDIA Linux diperlukan untuk NVENC."
 echo "- NVENC headers bukan pengganti NVIDIA driver."
 echo "- Encoder terdaftar belum menjamin dukungan GPU."
 
+log "Membersihkan source, dependencies, dan log build"
+rm -rf "$SRC_DIR" "$DEPS_DIR"
+or die "Gagal menghapus source atau dependencies."
+rm -f "$ROOT/configure.log" "$ROOT/build.log" "$ROOT/install.log"
+or die "Gagal menghapus log build."
+
 success "Semua proses build selesai."

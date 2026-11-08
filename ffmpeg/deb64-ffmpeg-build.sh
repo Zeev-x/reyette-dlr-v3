@@ -138,3 +138,10 @@ file "$FINAL_DIR/ffmpeg" "$FINAL_DIR/ffprobe"
 printf '\nFFmpeg : %s/ffmpeg\n' "$FINAL_DIR"
 printf 'FFprobe: %s/ffprobe\n' "$FINAL_DIR"
 printf '\nCatatan: driver NVIDIA diperlukan untuk menjalankan encoder NVENC.\n'
+
+log "Membersihkan source, dependencies, dan log build"
+rm -rf "$SRC_DIR" "$DEPS_DIR" \
+  || die "Gagal menghapus source atau dependencies."
+rm -f "$ROOT/configure-debian.log" "$ROOT/build-debian.log" "$ROOT/install-debian.log" \
+  || die "Gagal menghapus log build."
+printf 'Cleanup selesai; binary tersimpan di %s\n' "$FINAL_DIR"

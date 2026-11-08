@@ -86,6 +86,7 @@ log "Mengonfigurasi FFmpeg"
   --enable-static \
   --pkg-config-flags="--static" \
   --extra-ldflags="-static -static-libgcc -static-libstdc++" \
+  </dev/null \
   2>&1 | tee "$ROOT/configure.log"
 
 grep -q '^#define CONFIG_FFNVCODEC 1' config.h \
@@ -130,3 +131,10 @@ printf '\nVersi build:\n'
 printf '\nEncoder NVENC yang terdaftar:\n'
 "$FINAL_DIR/ffmpeg.exe" -encoders | grep -E 'h264_nvenc|hevc_nvenc|av1_nvenc' || true
 printf '\nCatatan: encoder yang terdaftar belum tentu didukung oleh hardware GPU Anda.\n'
+
+log "Membersihkan source, dependencies, dan log build"
+rm -rf "$SRC_DIR" "$DEPS_DIR" \
+  || die "Gagal menghapus source atau dependencies."
+rm -f "$ROOT/configure.log" "$ROOT/build.log" "$ROOT/install.log" \
+  || die "Gagal menghapus log build."
+printf 'Cleanup selesai; binary tersimpan di %s\n' "$FINAL_DIR"
