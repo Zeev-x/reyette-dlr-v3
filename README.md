@@ -40,6 +40,11 @@ How to build:
 ```bash
 NEXT UPDATE
 ```
+
+## Note
+```
+Tested on Windows 11 64-bit and Arch Linux 64-bit (Debian hasn't been tested because I don't use Debian)
+```
 ## Tahnks to
 * [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 * [Reyette](https://github.com/Zeev-x)
