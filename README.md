@@ -16,12 +16,12 @@ Reyette-dlr adalah tool sederhana berbasis **Python + FFmpeg + yt-dlp** untuk me
 ---
 
 ## 📦 Persyaratan
-- Gunakan Python 3.12 (jika ingin pakai ui)
+- Gunakan Python 3.12+ (jika ingin pakai ui)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [FFmpeg](https://ffmpeg.org/download.html) (pastikan ada di PATH)
 - Driver GPU terbaru (jika ingin pakai NVENC/AMF/QSV)
 
-How to use with ui (Work on windows only):
+How to use with ui (Work on windows and linux android not suport):
 ```bash
 - git clone https://github.com/Zeev-x/reyette-dlr-v2
 - cd reyette-dlr-v2
@@ -29,7 +29,7 @@ How to use with ui (Work on windows only):
 - python main.py
 ```
 
-How to use no ui:
+How to use no ui (android suport):
 ```bash
 pip install yt-dlp requests
 curl https://raw.githubusercontent.com/Zeev-x/reyette-dlr-v2/refs/heads/main/downloader.py >> main.py
