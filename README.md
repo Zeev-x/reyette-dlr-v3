@@ -38,7 +38,7 @@ python main.py
 
 How to build:
 ```bash
-NEXT UPDATE
+python build.py
 ```
 
 ## Note
