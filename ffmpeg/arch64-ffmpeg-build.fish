@@ -15,6 +15,7 @@ set -g ROOT (dirname (realpath (status filename)))
 set -g DEPS_DIR "$ROOT/dependencies"
 set -g SRC_DIR "$ROOT/source"
 set -g OUT_DIR "$ROOT/output"
+set -g FINAL_DIR "$ROOT/ffmpeg-linux64"
 
 set -g NVENC_DIR "$DEPS_DIR/nv-codec-headers"
 set -g FFMPEG_DIR "$SRC_DIR/FFmpeg"
@@ -306,6 +307,35 @@ if not test -f "$FFPROBE_BIN"
     die "Binary ffprobe tidak ditemukan."
 end
 
+log "Mengemas binary ke $FINAL_DIR"
+set -g PACKAGE_DIR (mktemp -d "$ROOT/.ffmpeg-linux64-package.XXXXXX")
+or die "Gagal membuat direktori pengemasan."
+set -g BACKUP_DIR (mktemp -d "$ROOT/.ffmpeg-linux64-backup.XXXXXX")
+or die "Gagal menyiapkan direktori backup."
+rmdir "$BACKUP_DIR"
+or die "Gagal menyiapkan direktori backup."
+cp -a "$OUT_DIR/bin/." "$PACKAGE_DIR/"
+or die "Gagal menyalin binary hasil build."
+
+if test -e "$FINAL_DIR"
+    mv "$FINAL_DIR" "$BACKUP_DIR"
+    or die "Gagal mencadangkan output sebelumnya."
+end
+
+if not mv "$PACKAGE_DIR" "$FINAL_DIR"
+    if test -e "$BACKUP_DIR"
+        mv "$BACKUP_DIR" "$FINAL_DIR"
+    end
+    die "Gagal memindahkan binary ke $FINAL_DIR."
+end
+
+rm -rf "$OUT_DIR"
+or die "Gagal menghapus direktori staging build."
+if test -e "$BACKUP_DIR"
+    rm -rf "$BACKUP_DIR"
+    or die "Gagal menghapus backup output sebelumnya."
+end
+
 success "FFmpeg dan FFprobe berhasil dibuat."
 
 # ============================================================
@@ -314,8 +344,8 @@ success "FFmpeg dan FFprobe berhasil dibuat."
 
 log "Memeriksa format binary"
 
-file "$FFMPEG_BIN"
-file "$FFPROBE_BIN"
+file "$FINAL_DIR/ffmpeg"
+file "$FINAL_DIR/ffprobe"
 
 # ============================================================
 # DISPLAY VERSION
@@ -323,7 +353,7 @@ file "$FFPROBE_BIN"
 
 log "Versi FFmpeg"
 
-"$FFMPEG_BIN" -version | head -n 3
+"$FINAL_DIR/ffmpeg" -version | head -n 3
 
 # ============================================================
 # CHECK NVENC ENCODERS
@@ -331,7 +361,7 @@ log "Versi FFmpeg"
 
 log "Memeriksa encoder NVENC"
 
-"$FFMPEG_BIN" -encoders | grep -E 'h264_nvenc|hevc_nvenc|av1_nvenc'
+"$FINAL_DIR/ffmpeg" -encoders | grep -E 'h264_nvenc|hevc_nvenc|av1_nvenc'
 
 # ============================================================
 # CHECK HWACCEL
@@ -339,7 +369,7 @@ log "Memeriksa encoder NVENC"
 
 log "Memeriksa hardware acceleration"
 
-"$FFMPEG_BIN" -hwaccels
+"$FINAL_DIR/ffmpeg" -hwaccels
 
 # ============================================================
 # FINAL OUTPUT
@@ -353,8 +383,8 @@ echo "============================================"
 set_color normal
 
 echo
-echo "FFmpeg : $FFMPEG_BIN"
-echo "FFprobe: $FFPROBE_BIN"
+echo "FFmpeg : $FINAL_DIR/ffmpeg"
+echo "FFprobe: $FINAL_DIR/ffprobe"
 
 echo
 echo "Catatan:"

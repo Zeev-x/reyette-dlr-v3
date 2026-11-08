@@ -9,7 +9,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$SCRIPT_DIR"
 DEPS_DIR="$ROOT/dependencies"
 SRC_DIR="$ROOT/source"
-OUT_DIR="$ROOT/output"
+OUT_DIR="$ROOT/build-output-win64"
+FINAL_DIR="$ROOT/ffmpeg-win64"
 NVENC_DIR="$DEPS_DIR/nv-codec-headers"
 FFMPEG_DIR="$SRC_DIR/FFmpeg"
 
@@ -101,11 +102,31 @@ make install 2>&1 | tee "$ROOT/install.log"
 [[ -f "$OUT_DIR/bin/ffmpeg.exe" ]] || die "ffmpeg.exe tidak ditemukan setelah instalasi."
 [[ -f "$OUT_DIR/bin/ffprobe.exe" ]] || die "ffprobe.exe tidak ditemukan setelah instalasi."
 
+log "Mengemas binary ke $FINAL_DIR"
+PACKAGE_DIR="$(mktemp -d "$ROOT/.ffmpeg-win64-package.XXXXXX")"
+BACKUP_DIR="$(mktemp -d "$ROOT/.ffmpeg-win64-backup.XXXXXX")"
+rmdir "$BACKUP_DIR" || die "Gagal menyiapkan direktori backup."
+cp -a "$OUT_DIR/bin/." "$PACKAGE_DIR/" || die "Gagal menyalin binary hasil build."
+
+if [[ -e "$FINAL_DIR" ]]; then
+  mv "$FINAL_DIR" "$BACKUP_DIR" || die "Gagal mencadangkan output sebelumnya."
+fi
+
+if ! mv "$PACKAGE_DIR" "$FINAL_DIR"; then
+  [[ ! -e "$BACKUP_DIR" ]] || mv "$BACKUP_DIR" "$FINAL_DIR"
+  die "Gagal memindahkan binary ke $FINAL_DIR."
+fi
+
+rm -rf "$OUT_DIR" || die "Gagal menghapus direktori staging build."
+if [[ -e "$BACKUP_DIR" ]]; then
+  rm -rf "$BACKUP_DIR" || die "Gagal menghapus backup output sebelumnya."
+fi
+
 log "Build selesai"
-printf 'FFmpeg : %s/bin/ffmpeg.exe\n' "$ROOT"
-printf 'FFprobe: %s/bin/ffprobe.exe\n' "$ROOT"
+printf 'FFmpeg : %s/ffmpeg.exe\n' "$FINAL_DIR"
+printf 'FFprobe: %s/ffprobe.exe\n' "$FINAL_DIR"
 printf '\nVersi build:\n'
-"$OUT_DIR/bin/ffmpeg.exe" -version | head -n 3
+"$FINAL_DIR/ffmpeg.exe" -version | head -n 3
 printf '\nEncoder NVENC yang terdaftar:\n'
-"$OUT_DIR/bin/ffmpeg.exe" -encoders | grep -E 'h264_nvenc|hevc_nvenc|av1_nvenc' || true
+"$FINAL_DIR/ffmpeg.exe" -encoders | grep -E 'h264_nvenc|hevc_nvenc|av1_nvenc' || true
 printf '\nCatatan: encoder yang terdaftar belum tentu didukung oleh hardware GPU Anda.\n'
