@@ -21,7 +21,7 @@ NVENC_TAG_PATTERN = re.compile(
 )
 PORTABLE_PYTHON_DIR = "Reyette_Roxylious_Atelier"
 ICON_URL = (
-    "https://raw.githubusercontent.com/Zeev-x/py-to-executor/"
+    "https://raw.githubusercontent.com/Zeev-x/reyette-dlr-v3/"
     "refs/heads/main/icon/icon.ico"
 )
 APP_NAME = "Premium Downloader"
