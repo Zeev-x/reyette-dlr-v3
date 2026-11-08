@@ -1,42 +1,296 @@
-import re
-import sys
+#!/usr/bin/env python3
+"""Select and run the FFmpeg builder for the current OS and NVENC API."""
+
+from __future__ import annotations
+
+import argparse
 import os
-import shutil
 import platform
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-env_path = "Reyette_Roxylious_Atelier"
-url_icon = "https://raw.githubusercontent.com/Zeev-x/py-to-executor/refs/heads/main/icon/icon.ico"
-os_system = platform.system().lower()
-script_name = os.path.basename(sys.argv[0])
-script_location = os.getcwd()
+ROOT = Path(__file__).resolve().parent
+BUILDER_DIR = ROOT / "ffmpeg"
+SUPPORTED_NVENC_API = "13.0"
+BUILD_TARGET_MARKER = BUILDER_DIR / ".ffmpeg-build-target"
+NVENC_TAG_PATTERN = re.compile(
+    r'NVENC_TAG(?:\s*=\s*|\s+)["\']n?(\d+\.\d+\.\d+\.\d+)["\']'
+)
+PORTABLE_PYTHON_DIR = "Reyette_Roxylious_Atelier"
+ICON_URL = (
+    "https://raw.githubusercontent.com/Zeev-x/py-to-executor/"
+    "refs/heads/main/icon/icon.ico"
+)
+APP_NAME = "Premium Downloader"
 
-def get_main_file():
-    while True:
-        main_file = input("Masukkan nama file utama (main.py): ").strip()
-        if not main_file:
-            print("Nama file utama tidak boleh kosong.")
-        elif not main_file.endswith(".py"):
-            print("Nama file utama harus berakhiran .py.")
-        else:
-            return main_file
 
-def portable_py():
-    path_py_port = os.path.join(script_location, "reyette_py")
-    if not os.path.exists(path_py_port):
-        setup_location = os.path.join(script_location, "py_setup.exe")
-        ppy_cmd = [
-            f"curl -L -o {setup_location} https://github.com/Zeev-x/portable-python-windows/raw/refs/heads/main/py-setup.exe",
-            f"{setup_location} 12 64",
-            f"del {setup_location}"
+def fail(message: str) -> int:
+    print(f"ERROR: {message}", file=sys.stderr)
+    return 1
+
+
+def read_os_release() -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        lines = (Path("/etc/os-release")).read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise RuntimeError(f"Tidak dapat membaca /etc/os-release: {error}") from error
+
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def select_builder() -> tuple[Path, str]:
+    system = platform.system()
+    machine = platform.machine().lower()
+    if machine not in {"x86_64", "amd64"}:
+        raise RuntimeError(f"Arsitektur {machine} tidak didukung; builder ini untuk x86_64.")
+
+    if system == "Windows":
+        return BUILDER_DIR / "win64-ffmpeg-build.sh", "Windows (MSYS2 UCRT64)"
+    if system != "Linux":
+        raise RuntimeError(f"OS {system} belum didukung.")
+
+    os_release = read_os_release()
+    distribution = os_release.get("ID", "").lower()
+    id_like = os_release.get("ID_LIKE", "").lower().split()
+    if distribution == "arch":
+        return BUILDER_DIR / "arch64-ffmpeg-build.fish", "Arch-based Linux"
+    if distribution == "debian":
+        return BUILDER_DIR / "deb64-ffmpeg-build.sh", "Debian-based Linux"
+    if "arch" in id_like:
+        return BUILDER_DIR / "arch64-ffmpeg-build.fish", "Arch-based Linux"
+    if "debian" in id_like:
+        return BUILDER_DIR / "deb64-ffmpeg-build.sh", "Debian-based Linux"
+    raise RuntimeError(
+        f"Distribusi Linux '{distribution or 'unknown'}' belum didukung "
+        "(builder tersedia untuk distro basis Debian dan Arch)."
+    )
+
+
+def get_configured_nvenc_version(builder: Path) -> tuple[str, str]:
+    try:
+        content = builder.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeError(f"Tidak dapat membaca builder {builder.name}: {error}") from error
+
+    match = NVENC_TAG_PATTERN.search(content)
+    if match is None:
+        raise RuntimeError(f"Tag NVENC tidak ditemukan di {builder.name}.")
+
+    version = match.group(1)
+    api_version = ".".join(version.split(".")[:2])
+    return version, api_version
+
+
+def find_existing_ffmpeg(system: str) -> Path:
+    if system == "Windows":
+        return BUILDER_DIR / "ffmpeg-win64" / "ffmpeg.exe"
+    return BUILDER_DIR / "ffmpeg-linux64" / "ffmpeg"
+
+
+def is_build_complete(builder: Path, system: str) -> bool:
+    executable = find_existing_ffmpeg(system)
+    if not executable.is_file() or not BUILD_TARGET_MARKER.is_file():
+        return False
+    try:
+        return BUILD_TARGET_MARKER.read_text(encoding="utf-8").strip() == builder.name
+    except OSError as error:
+        raise RuntimeError(f"Tidak dapat membaca penanda build: {error}") from error
+
+
+def find_msys2_root() -> Path:
+    candidates: list[Path] = []
+    configured_root = os.environ.get("MSYS2_ROOT")
+    if configured_root:
+        candidates.append(Path(configured_root).expanduser())
+
+    candidates.extend(
+        [
+            Path(r"C:\msys64"),
+            Path(r"C:\tools\msys64"),
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "MSYS2",
         ]
-        for cmd in ppy_cmd:
-            print(f"Runing >> {cmd}")
-            os.system(cmd)
-    else:
-        print("Portable python sudah ada.")
+    )
 
-def create_version_file(app_name="reyette-builder", company="Reyette"):
-    content = f"""# UTF-8
+    for candidate in candidates:
+        if (candidate / "usr" / "bin" / "bash.exe").is_file() and (
+            candidate / "usr" / "bin" / "cygpath.exe"
+        ).is_file():
+            return candidate
+
+    raise RuntimeError(
+        "MSYS2 tidak ditemukan. Pasang MSYS2 UCRT64 atau set environment variable MSYS2_ROOT."
+    )
+
+
+def run_windows_builder(builder: Path) -> int:
+    msys2_root = find_msys2_root()
+    bash = msys2_root / "usr" / "bin" / "bash.exe"
+    cygpath = msys2_root / "usr" / "bin" / "cygpath.exe"
+
+    path_result = subprocess.run(
+        [str(cygpath), "-u", str(builder)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    builder_posix_path = path_result.stdout.strip()
+
+    environment = os.environ.copy()
+    environment["MSYSTEM"] = "UCRT64"
+    environment["CHERE_INVOKING"] = "1"
+    environment["PATH"] = os.pathsep.join(
+        [
+            str(msys2_root / "ucrt64" / "bin"),
+            str(msys2_root / "usr" / "bin"),
+            environment.get("PATH", ""),
+        ]
+    )
+    command = (
+        '[[ "${MSYSTEM:-}" == "UCRT64" ]] || '
+        '{ echo "MSYS2 UCRT64 environment was not initialized." >&2; exit 1; }; '
+        'exec bash "$1"'
+    )
+    result = subprocess.run(
+        [str(bash), "--login", "-c", command, "build.py", builder_posix_path],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+    )
+    return result.returncode
+
+
+def run_builder(builder: Path) -> int:
+    if not builder.is_file():
+        return fail(f"Builder tidak ditemukan: {builder}")
+
+    system = platform.system()
+    if system == "Windows":
+        try:
+            return run_windows_builder(builder)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            return fail(f"Gagal menjalankan builder melalui MSYS2 UCRT64: {error}")
+
+    if system == "Linux" and builder.suffix == ".fish":
+        fish = shutil.which("fish")
+        if fish is None:
+            return fail("Fish tidak ditemukan. Pasang Fish untuk menjalankan builder Arch Linux.")
+        command = [fish, str(builder)]
+    else:
+        bash = shutil.which("bash")
+        if bash is None:
+            return fail("Bash tidak ditemukan.")
+        command = [bash, str(builder)]
+
+    try:
+        return subprocess.run(command, cwd=ROOT, check=False).returncode
+    except OSError as error:
+        return fail(f"Gagal menjalankan builder {builder.name}: {error}")
+
+
+def run_application_build() -> int:
+    try:
+        return build_application()
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        return fail(f"Gagal membuat executable: {error}")
+
+
+def ensure_icon() -> None:
+    icon_path = ROOT / "icon" / "icon.ico"
+    if icon_path.is_file():
+        return
+    curl = shutil.which("curl")
+    if curl is None:
+        raise RuntimeError("curl diperlukan untuk mengunduh icon aplikasi.")
+    icon_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [curl, "-fL", "-o", str(icon_path), ICON_URL],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def ensure_portable_python() -> Path:
+    portable_python = ROOT / "reyette_py"
+    if portable_python.is_dir():
+        print("Portable Python sudah tersedia.")
+        return ROOT / "pyr.exe"
+
+    setup_path = ROOT / "py_setup.exe"
+    curl = shutil.which("curl")
+    if curl is None:
+        raise RuntimeError("curl diperlukan untuk mengunduh portable Python.")
+    print("Mengunduh installer portable Python...")
+    subprocess.run(
+        [
+            curl,
+            "-fL",
+            "-o",
+            str(setup_path),
+            "https://github.com/Zeev-x/portable-python-windows/raw/refs/heads/main/py-setup.exe",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    try:
+        subprocess.run([str(setup_path), "12", "64"], cwd=ROOT, check=True)
+    finally:
+        setup_path.unlink(missing_ok=True)
+
+    python_executable = ROOT / "pyr.exe"
+    if not python_executable.is_file():
+        raise RuntimeError(f"Portable Python tidak menghasilkan {python_executable.name}.")
+    return python_executable
+
+
+def get_project_packages() -> list[str]:
+    requirements = ROOT / "requirements.txt"
+    if not requirements.is_file():
+        print("requirements.txt tidak ditemukan; tidak ada dependensi proyek tambahan.")
+        return []
+
+    packages = [
+        line.strip()
+        for line in requirements.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    return packages
+
+
+def collect_additional_data(system: str) -> list[str]:
+    excluded_files = {"main.py", "build.py", "pyr.exe"}
+    excluded_directories = {PORTABLE_PYTHON_DIR, "Reyette_Roxylious_Atelier"}
+    additional_data: list[str] = []
+    separator = ";" if system == "Windows" else ":"
+
+    for current_dir, directories, filenames in os.walk(ROOT):
+        directories[:] = [
+            directory
+            for directory in directories
+            if directory not in excluded_directories
+            and directory not in {"__pycache__", ".git"}
+        ]
+        for filename in filenames:
+            if filename in excluded_files:
+                continue
+            source = Path(current_dir) / filename
+            destination = source.parent.relative_to(ROOT)
+            destination_name = str(destination) if destination.parts else "."
+            additional_data.append(f"{source}{separator}{destination_name}")
+    return additional_data
+
+
+def create_version_file() -> Path:
+    version_file = ROOT / "versionfile.txt"
+    version_file.write_text(
+        f"""# UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
     filevers=(1, 0, 0, 0),
@@ -52,176 +306,170 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'{company}'),
-         StringStruct(u'FileDescription', u'{app_name} Application'),
-         StringStruct(u'ProductName', u'{app_name}'),
-         StringStruct(u'InternalName', u'{app_name}'),
-         StringStruct(u'OriginalFilename', u'{app_name}.exe'),
-         StringStruct(u'LegalCopyright', u'(c) 2026 {company}')]
+        [StringStruct(u'CompanyName', u'Reyette'),
+         StringStruct(u'FileDescription', u'{APP_NAME} Application'),
+         StringStruct(u'ProductName', u'{APP_NAME}'),
+         StringStruct(u'InternalName', u'{APP_NAME}'),
+         StringStruct(u'OriginalFilename', u'{APP_NAME}.exe'),
+         StringStruct(u'LegalCopyright', u'(c) 2026 Reyette')]
         )
       ]),
     VarFileInfo([VarStruct(u'Translation', [0x0409, 1200])])
   ]
 )
-"""
-    with open("versionfile.txt", "w", encoding="utf-8") as vf:
-        vf.write(content)
+""",
+        encoding="utf-8",
+    )
+    return version_file
 
-def get_requirements_or_detect(root_dir="."):
-    req_file = os.path.join(root_dir, "requirements.txt")
-    if os.path.exists(req_file):
-        print("requirements.txt ditemukan, menggunakan daftar paket dari file...")
-        try:
-            with open(req_file, "r", encoding="utf-8") as f:
-                packages = []
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        pkg = line.split("==")[0].split(">=")[0].split("<=")[0]
-                        packages.append(pkg)
-                return " ".join(sorted(set(packages)))
-        except Exception as e:
-            print(f"Gagal membaca requirements.txt: {e}")
-            return None
+
+def run_pyinstaller(system: str, additional_data: list[str]) -> Path:
+    if system == "Windows":
+        python_executable = ensure_portable_python()
+        pip_command = [str(python_executable), "-m", "pip", "install", "--upgrade"]
+        pip_command.extend(get_project_packages())
+        pip_command.append("pyinstaller")
+        subprocess.run(pip_command, cwd=ROOT, check=True)
+        pyinstaller = [str(python_executable), "-m", "PyInstaller"]
     else:
-        print("requirements.txt tidak ada, build akan dilakukan tanpa paket pip tambahan.")
-        return None
+        environment = ROOT / PORTABLE_PYTHON_DIR
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(environment)],
+            cwd=ROOT,
+            check=True,
+        )
+        python_executable = environment / "bin" / "python"
+        subprocess.run(
+            [
+                str(python_executable),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                *get_project_packages(),
+                "pyinstaller",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        pyinstaller = [str(environment / "bin" / "pyinstaller")]
 
-def get_all_data(xfile, xdirs, root_dir="."):
-    EXCLUDE_DIRS = {env_path, *xdirs}
-    EXCLUDE_FILES = {script_name, *xfile}
-    additional_data = []
-    for dirpath, _, filenames in os.walk(root_dir):
-        if any(ex in dirpath.split(os.sep) for ex in EXCLUDE_DIRS):
-            continue
-        for fname in filenames:
-            if fname in EXCLUDE_FILES:
-                continue
-            file_path = os.path.join(dirpath, fname)
-            rel_path = os.path.relpath(file_path, root_dir)
-            dest_folder = os.path.dirname(rel_path)
-            # kalau file ada di root, gunakan "." sebagai dest
-            if not dest_folder:
-                dest_folder = "."
-            if os_system == "windows":
-                additional_data.append(f"{file_path};{dest_folder}")
+    command = [
+        *pyinstaller,
+        "main.py",
+        "--onefile",
+        f"--icon={ROOT / 'icon' / 'icon.ico'}",
+        f"--name={APP_NAME}",
+        "--windowed",
+    ]
+    if system == "Windows":
+        command.append(f"--version-file={ROOT / 'versionfile.txt'}")
+    for data in additional_data:
+        command.extend(["--add-data", data])
+    subprocess.run(command, cwd=ROOT, check=True)
+
+    suffix = ".exe" if system == "Windows" else ""
+    output = ROOT / "dist" / f"{APP_NAME}{suffix}"
+    if not output.is_file():
+        raise RuntimeError(f"PyInstaller selesai tetapi output tidak ditemukan: {output}")
+    return output
+
+
+def build_application() -> int:
+    system = platform.system()
+    if system not in {"Windows", "Linux"}:
+        raise RuntimeError(f"Build executable tidak didukung pada {system}.")
+
+    ensure_icon()
+    version_file = create_version_file()
+    additional_data = collect_additional_data(system)
+    print(f"\nMenyiapkan executable {APP_NAME}...")
+    print(f"Dependensi: {', '.join(get_project_packages()) or 'tidak ada'}")
+
+    if input("Lanjutkan build executable? (y/n): ").strip().lower() != "y":
+        print("Build executable dibatalkan.")
+        version_file.unlink(missing_ok=True)
+        return 0
+
+    try:
+        output = run_pyinstaller(system, additional_data)
+        destination = ROOT / output.name
+        if destination.exists():
+            destination.unlink()
+        shutil.move(str(output), str(destination))
+        print(f"Executable berhasil dibuat: {destination}")
+        return 0
+    finally:
+        cleanup_paths = [ROOT / "build", ROOT / "dist", version_file]
+        if system == "Linux":
+            cleanup_paths.append(ROOT / PORTABLE_PYTHON_DIR)
+        for path in cleanup_paths:
+            if path.is_dir():
+                shutil.rmtree(path)
             else:
-                additional_data.append(f"{file_path}:{dest_folder}")
-    return additional_data
+                path.unlink(missing_ok=True)
+        spec_file = ROOT / f"{APP_NAME}.spec"
+        spec_file.unlink(missing_ok=True)
 
-def get_icon(url):
-    icon_path = os.path.join("icon", "icon.ico")
-    if os.path.exists(icon_path):
-        print("Icon sudah ada.")
-        return
-    os.makedirs("icon", exist_ok=True)
-    cmd = f"curl -o {icon_path} {url}"
-    os.system(cmd)
 
-def run_cmd(main_file, name_of_app, windowed_option, additional_data, package_pip=None):
-    def get_pip_final(package_pip):
-        return f"{package_pip} pyinstaller" if package_pip else "pyinstaller"
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Deteksi OS dan jalankan builder FFmpeg untuk NVENC API 13.0."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Tampilkan builder dan versi API yang dipilih tanpa menjalankan build.",
+    )
+    args = parser.parse_args()
 
-    if os_system == "windows":
-        py_location = os.path.join(script_location, "pyr.exe")
-        cmd = [
-            f"{py_location} -m pip install --upgrade {get_pip_final(package_pip)}",
-            f'{py_location} -m PyInstaller {main_file} --onefile --icon=icon/icon.ico --name="{name_of_app}" {windowed_option} --version-file=versionfile.txt {" ".join([f"--add-data \"{data}\"" for data in additional_data])}',
-        ]
-    else:
-        cmd = [
-            f"python -m venv {env_path}",
-            f"{env_path}/bin/python -m pip install --upgrade {get_pip_final(package_pip)}",
-            f'{env_path}/bin/pyinstaller {main_file} --onefile --icon=icon/icon.ico --name="{name_of_app}" {windowed_option} --version-file=versionfile.txt {" ".join([f"--add-data \"{data}\"" for data in additional_data])}',
-        ]
-    for x in cmd:
-        print(f"Running: {x}")
-        os.system(x)
+    try:
+        builder, os_name = select_builder()
+        existing_ffmpeg = find_existing_ffmpeg(platform.system())
+        if is_build_complete(builder, platform.system()):
+            print(f"FFmpeg sudah tersedia: {existing_ffmpeg}")
+            print(f"Builder cocok: {builder.name}")
+            print("Build dilewati.")
+            if args.dry_run:
+                print("Dry run: build executable tidak dijalankan.")
+                return 0
+            return run_application_build()
 
-def after_build_windows(app_name):
-    src = os.path.join("dist", f"{app_name}.exe")
-    dst = os.path.join(os.getcwd(), f"{app_name}.exe")
-    if os.path.exists(src):
-        shutil.move(src, dst)
-        print(f"Moved {src} to {dst}")
-    for x in [env_path, "build", "dist"]:
-        if os.path.exists(x):
-            shutil.rmtree(x)
-    spec_file = f"{app_name}.spec"
-    for y in [spec_file, "versionfile.txt"]:
-        if os.path.exists(y):
-            os.remove(y)
+        if existing_ffmpeg.is_file():
+            print(
+                f"FFmpeg tersedia, tetapi belum ditandai sebagai hasil "
+                f"{builder.name}; build akan dijalankan ulang."
+            )
 
-def after_build_linux(app_name):
-    src = os.path.join("dist", app_name)
-    dst = os.path.join(os.getcwd(), app_name)
-    if os.path.exists(src):
-        shutil.move(src, dst)
-        print(f"Moved {src} to {dst}")
-    for x in [env_path, "build", "dist"]:
-        if os.path.exists(x):
-            shutil.rmtree(x)
-    spec_file = f"{app_name}.spec"
-    for y in [spec_file, "versionfile.txt"]:
-        if os.path.exists(y):
-            os.remove(y)
+        nvenc_version, api_version = get_configured_nvenc_version(builder)
+    except RuntimeError as error:
+        return fail(str(error))
 
-def worker():
-    get_icon(url_icon)
-    if os_system == "windows":
-        portable_py()
+    print(f"OS terdeteksi       : {os_name}")
+    print(f"NVENC headers target: {nvenc_version}")
+    print(f"NVENC API target    : {api_version}")
 
-    if len(sys.argv) >= 4:
-        main_file = sys.argv[1]
-        name_of_app = sys.argv[2]
-        windowed_option = sys.argv[3].lower()
-        windowed_option = "--windowed" if windowed_option in ("y", "yes", "window", "win", "windowed") else ""
-    else:
-        main_file = get_main_file()
-        name_of_app = input("Nama aplikasi: ").strip()
-        windowed_option = input("Apakah aplikasi ini windowed? (y/n): ").strip().lower()
-        windowed_option = "--windowed" if windowed_option == "y" else ""
+    if api_version != SUPPORTED_NVENC_API:
+        return fail(
+            f"API {api_version} tidak didukung; build hanya dijalankan untuk "
+            f"NVENC API {SUPPORTED_NVENC_API}."
+        )
 
-    package_pip_project = get_requirements_or_detect(".")
+    print(f"Builder             : {builder.name}")
+    if args.dry_run:
+        print("Dry run: builder tidak dijalankan.")
+        return 0
 
-    if os_system == "windows":
-        data_filesx = [main_file, "pyr.exe"]
-        data_dirx = ["reyette_py"]
-        additional_data = get_all_data(data_filesx, data_dirx, ".")
-    else:
-        additional_data = get_all_data([main_file], [], ".")
+    print(f"Menjalankan build FFmpeg untuk {os_name}...")
+    result = run_builder(builder)
+    if result != 0:
+        return result
+    try:
+        BUILD_TARGET_MARKER.write_text(f"{builder.name}\n", encoding="utf-8")
+    except OSError as error:
+        return fail(f"Build berhasil, tetapi penanda target tidak dapat disimpan: {error}")
+    return run_application_build()
 
-    create_version_file(app_name=name_of_app, company="Reyette")
-
-    print("=== Konfigurasi Build ===")
-    print(f"File utama: {main_file}")
-    print(f"Package pip: {package_pip_project if package_pip_project else 'Tidak ada'}")
-    print(f"Nama aplikasi: {name_of_app}")
-    print(f"Mode windowed: {'Ya' if windowed_option else 'Tidak'}")
-    if additional_data:
-        print("Data tambahan:")
-        for data in additional_data:
-            print(f" - {data}")
-
-    if len(sys.argv) >= 4:
-        confirm = 'y'
-    else:
-        confirm = input("Lanjutkan build? (y/n): ").strip().lower()
-
-    if confirm == 'y':
-        run_cmd(main_file, name_of_app, windowed_option, additional_data, package_pip_project)
-        if os_system == "windows":
-            after_build_windows(name_of_app)
-        else:
-            after_build_linux(name_of_app)
-    else:
-        print("Build dibatalkan.")
 
 if __name__ == "__main__":
-    try:
-        worker()
-    except KeyboardInterrupt:
-        print("Closing by user")
-    finally:
-        if os_system == "windows":
-            os.system("pause")
+    raise SystemExit(main())
