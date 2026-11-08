@@ -26,7 +26,7 @@ else:
         "ffmpeg",
         "ffmpeg-linux64",
     )
-    FFMPEG_EXECUTABLE = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
+    FFMPEG_EXECUTABLE = os.path.join(FFMPEG_DIR, "ffmpeg")
 
 if not os.path.exists(FFMPEG_EXECUTABLE):
     FFMPEG_EXECUTABLE = "ffmpeg"  # fallback to system ffmpeg if not found
@@ -103,6 +103,22 @@ def resolve_quality(value):
         return "bestvideo[vcodec!*=av01]"
     return "bestvideo[vcodec!*=av01]"
 
+def resolve_quality_adult(value):
+    if value is None:
+        return "bestvideo[vcodec!*=av01]"
+    x_qual = str(value).strip().lower()
+    if x_qual in ["360p", "360"]:
+        return "bestvideo[height<=360]"
+    if x_qual in ["480p", "480"]:
+        return "bestvideo[height<=480]"
+    if x_qual in ["720p", "720"]:
+        return "bestvideo[height<=720]"
+    if x_qual in ["1080p", "1080"]:
+        return "bestvideo[height<=1080]"
+    if x_qual == "max":
+        return "bestvideo"
+    return "bestvideo"
+
 
 def get_url(args=None):
     if args and getattr(args, "url", None):
@@ -127,6 +143,14 @@ def get_quality(args=None):
         return resolve_quality(sys.argv[3])
     x_qual = input("Pilih kualitas (360p/480p/720p/1080p/max): ").strip().lower()
     return resolve_quality(x_qual)
+
+def get_quality_adult(args=None):
+    if args and getattr(args, "quality", None):
+        return resolve_quality_adult(args.quality)
+    if len(sys.argv) > 3:
+        return resolve_quality_adult(sys.argv[3])
+    x_qual = input("Pilih kualitas (360p/480p/720p/1080p/max): ").strip().lower()
+    return resolve_quality_adult(x_qual)
 
 def sanitize_filename(name: str) -> str:
     name = re.sub(r'[\\/*?:"<>|#]', '', name)
@@ -445,11 +469,11 @@ def do_work(args=None):
             else:
                 log("❌ Error: file hasil download tidak ditemukan!")
         elif platform in ["xhamster", "xvideos", "xnxx"]:
-            fmt = get_quality(args)
+            fmt = get_quality_adult(args)
             log(f"Mulai mengunduh dari {platform}: {url}")
             ydl_opts = {
                 'outtmpl': f'{target_dir}/%(title)s.%(ext)s',
-                'format': fmt + "+bestaudio/best[vcodec!*=av01]",
+                'format': fmt + "+bestaudio/best",
                 'noprogress': False,
                 'quiet': False,
                 'force-overwrites': True,
