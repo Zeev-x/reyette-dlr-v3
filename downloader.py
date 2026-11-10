@@ -102,7 +102,7 @@ def resolve_quality(value):
         return "bestvideo[vcodec!*=av01]"
     return "bestvideo[vcodec!*=av01]"
 
-def resolve_quality_adult(value):
+def resolve_quality_nonav(value):
     if value is None:
         return "bestvideo[vcodec!*=av01]"
     x_qual = str(value).strip().lower()
@@ -143,13 +143,13 @@ def get_quality(args=None):
     x_qual = input("Pilih kualitas (360p/480p/720p/1080p/max): ").strip().lower()
     return resolve_quality(x_qual)
 
-def get_quality_adult(args=None):
+def get_quality_nonav(args=None):
     if args and getattr(args, "quality", None):
-        return resolve_quality_adult(args.quality)
+        return resolve_quality_nonav(args.quality)
     if len(sys.argv) > 3:
-        return resolve_quality_adult(sys.argv[3])
+        return resolve_quality_nonav(sys.argv[3])
     x_qual = input("Pilih kualitas (360p/480p/720p/1080p/max): ").strip().lower()
-    return resolve_quality_adult(x_qual)
+    return resolve_quality_nonav(x_qual)
 
 def sanitize_filename(name: str) -> str:
     name = re.sub(r'[\\/*?:"<>|#]', '', name)
@@ -392,11 +392,12 @@ def do_work(args=None):
                 'no_warnings': True,
                 'force-overwrites': True
             }
-
+            log("Download video...")
             with create_youtube_dl(ydl_opts_v) as ydl:
                 result_v = ydl.extract_info(url, download=True)
                 video_file = ydl.prepare_filename(result_v)
 
+            log("Download audio...")
             with create_youtube_dl(ydl_opts_a) as ydl:
                 result_a = ydl.extract_info(url, download=True)
                 audio_file = ydl.prepare_filename(result_a)
@@ -468,7 +469,7 @@ def do_work(args=None):
             else:
                 log("❌ Error: file hasil download tidak ditemukan!")
         elif platform in ["xhamster", "xvideos", "xnxx"]:
-            fmt = get_quality_adult(args)
+            fmt = get_quality_nonav(args)
             log(f"Mulai mengunduh dari {platform}: {url}")
             ydl_opts = {
                 'outtmpl': f'{target_dir}/%(title)s.%(ext)s',
@@ -478,6 +479,7 @@ def do_work(args=None):
                 'force-overwrites': True,
                 'merge_output_format': 'mp4'
             }
+            log("Download video...")
             with create_youtube_dl(ydl_opts) as ydl:
                 result = ydl.extract_info(url, download=True)
                 video_file = ydl.prepare_filename(result)
@@ -485,7 +487,7 @@ def do_work(args=None):
             if video_file:
                 log("Download Selesai di: " + video_file)
         else:
-            fmt = get_quality(args)
+            fmt = get_quality_nonav(args)
             log(f"Mulai mengunduh dari {platform}: {url}")
             ydl_opts = {
                 'outtmpl': f'{target_dir}/sv_temp.%(ext)s',
@@ -494,6 +496,7 @@ def do_work(args=None):
                 'quiet': False,
                 'force-overwrites': True,
             }
+            log("Download video...")
             with create_youtube_dl(ydl_opts) as ydl:
                 result = ydl.extract_info(url, download=True)
                 video_file = ydl.prepare_filename(result)
