@@ -6,7 +6,6 @@ import os
 import subprocess
 import yt_dlp
 import re
-import requests
 import sys
 import platform
 from types import SimpleNamespace

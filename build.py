@@ -19,13 +19,16 @@ BUILD_TARGET_MARKER = BUILDER_DIR / ".ffmpeg-build-target"
 NVENC_TAG_PATTERN = re.compile(
     r'NVENC_TAG(?:\s*=\s*|\s+)["\']n?(\d+\.\d+\.\d+\.\d+)["\']'
 )
-PORTABLE_PYTHON_DIR = "Reyette_Roxylious_Atelier"
+PORTABLE_PYTHON_DIR = "reyette_py"
+PORTABLE_PYTHON_DIR_LINUX = "Reyette_Roxylious_Atelier"
 ICON_URL = (
-    "https://raw.githubusercontent.com/Zeev-x/reyette-dlr-v3/"
+    "https://raw.githubusercontent.com/Zeev-x/py-to-executor/"
     "refs/heads/main/icon/icon.ico"
 )
 APP_NAME = "Premium Downloader"
+MAIN_FILE = "main.py"
 
+MODE_OPTION = "--windowed" #Switch to "--windowed" or "--console" depending on your preference for the application window mode.
 
 def fail(message: str) -> int:
     print(f"ERROR: {message}", file=sys.stderr)
@@ -266,7 +269,7 @@ def get_project_packages() -> list[str]:
 
 def collect_additional_data(system: str) -> list[str]:
     excluded_files = {"main.py", "build.py", "pyr.exe"}
-    excluded_directories = {PORTABLE_PYTHON_DIR, "Reyette_Roxylious_Atelier"}
+    excluded_directories = {PORTABLE_PYTHON_DIR, PORTABLE_PYTHON_DIR_LINUX, "__pycache__", ".git"}
     additional_data: list[str] = []
     separator = ";" if system == "Windows" else ":"
 
@@ -356,11 +359,11 @@ def run_pyinstaller(system: str, additional_data: list[str]) -> Path:
 
     command = [
         *pyinstaller,
-        "main.py",
+        MAIN_FILE,
         "--onefile",
         f"--icon={ROOT / 'icon' / 'icon.ico'}",
         f"--name={APP_NAME}",
-        "--windowed",
+        MODE_OPTION,
     ]
     if system == "Windows":
         command.append(f"--version-file={ROOT / 'versionfile.txt'}")
@@ -386,11 +389,6 @@ def build_application() -> int:
     print(f"\nMenyiapkan executable {APP_NAME}...")
     print(f"Dependensi: {', '.join(get_project_packages()) or 'tidak ada'}")
 
-    if input("Lanjutkan build executable? (y/n): ").strip().lower() != "y":
-        print("Build executable dibatalkan.")
-        version_file.unlink(missing_ok=True)
-        return 0
-
     try:
         output = run_pyinstaller(system, additional_data)
         destination = ROOT / output.name
@@ -400,14 +398,16 @@ def build_application() -> int:
         print(f"Executable berhasil dibuat: {destination}")
         return 0
     finally:
-        cleanup_paths = [ROOT / "build", ROOT / "dist", version_file]
+        cleanup_paths = [ROOT / "build", ROOT / PORTABLE_PYTHON_DIR, ROOT / "dist", version_file]
         if system == "Linux":
-            cleanup_paths.append(ROOT / PORTABLE_PYTHON_DIR)
+            cleanup_paths.append(ROOT / PORTABLE_PYTHON_DIR_LINUX)
         for path in cleanup_paths:
             if path.is_dir():
                 shutil.rmtree(path)
             else:
                 path.unlink(missing_ok=True)
+        pyr_executable = ROOT / "pyr.exe"
+        pyr_executable.unlink(missing_ok=True)
         spec_file = ROOT / f"{APP_NAME}.spec"
         spec_file.unlink(missing_ok=True)
 
